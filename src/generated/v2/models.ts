@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/v2/posts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a new post
+         * @description Creates a new post for a brand, including generated copy, media, and scheduling details.
+         */
+        post: operations["createPost"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v2/brands/{brandId}": {
         parameters: {
             query?: never;
@@ -43,6 +63,12 @@ export interface components {
                 /** @description Additional details about the execution */
                 details?: string;
             }[];
+        };
+        PostDocument: components["schemas"]["BaseModel"] & {
+            brandId?: string;
+            postCopy?: components["schemas"]["postCopy"];
+            /** @enum {string} */
+            status?: "draft" | "scheduled" | "posted" | "failed";
         };
         BrandDocument: components["schemas"]["BaseModel"] & {
             userId?: string;
@@ -105,6 +131,14 @@ export interface components {
                 /** @description The structure or layout of the media content */
                 mediaStructure?: string;
             };
+        };
+        postCopy: {
+            /** @description The content of the post. */
+            content?: string;
+            /** @description A comment on the post. */
+            comment?: string;
+            /** @description A list of hashtags associated with the post. */
+            hashtags?: string[];
         };
         BrandStyle: {
             colors?: {
@@ -169,6 +203,19 @@ export interface components {
             /** @description unique identifier for the record */
             id: string;
             metadata: components["schemas"]["Metadata"];
+        };
+        postResponse: {
+            /** @description Unique identifier for the post. */
+            id: string;
+            brandId: string;
+            contentCopy: components["schemas"]["postCopy"];
+            /** @enum {string} */
+            status?: "draft" | "scheduled" | "posted" | "failed";
+        };
+        postRequest: {
+            /** @description The brand this post belongs to. */
+            brandId: string;
+            contentCopy: components["schemas"]["postCopy"];
         };
         ContentOrchestratorRequest: {
             /** @description The brand partition key in CosmosDB. */
@@ -265,6 +312,34 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    createPost: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["postRequest"];
+            };
+        };
+        responses: {
+            /** @description Post created successfully */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["postResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
     getBrandById: {
         parameters: {
             query?: never;

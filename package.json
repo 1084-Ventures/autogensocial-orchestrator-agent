@@ -7,7 +7,7 @@
     "watch": "tsc -w",
     "clean": "rimraf dist",
     "prestart": "npm run clean && npm run build",
-    "start": "func start --port 7072 --verbose",
+    "start": "func start --port 7073 --verbose",
     "generate:models:v1": "openapi-typescript '../specs/openapi-bundled.json' --output '.src/generated/models.ts'",
     "generate:models:v2": "openapi-typescript '../specs/v2/openapi-bundled.json' --output './src/generated/v2/models.ts'",
     "copy:fonts": "cp ../specs/resources/fonts.ts ./src/shared/fonts.ts",
