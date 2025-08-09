@@ -208,14 +208,14 @@ export interface components {
             /** @description Unique identifier for the post. */
             id: string;
             brandId: string;
-            contentCopy: components["schemas"]["postCopy"];
+            postCopy: components["schemas"]["postCopy"];
             /** @enum {string} */
             status?: "draft" | "scheduled" | "posted" | "failed";
         };
         postRequest: {
             /** @description The brand this post belongs to. */
             brandId: string;
-            contentCopy: components["schemas"]["postCopy"];
+            postCopy: components["schemas"]["postCopy"];
         };
         ContentOrchestratorRequest: {
             /** @description The brand partition key in CosmosDB. */

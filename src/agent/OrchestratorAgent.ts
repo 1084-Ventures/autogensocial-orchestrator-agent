@@ -1,78 +1,83 @@
-import { AgentsClient } from "@azure/ai-agents";
+import { AgentsClient, ToolUtility } from "@azure/ai-agents";
 import { DefaultAzureCredential } from "@azure/identity";
-import { ToolUtility } from "@azure/ai-agents";
 import { getBrandTool } from "../tools/getBrandTool";
 import { createPostTool } from "../tools/createPostTool";
+import { components } from "../generated/v2/models";
+type postCopy = components["schemas"]["postCopy"];
 
-// OrchestratorAgent: orchestrates brand content creation using reasoning/planning and real AI model
 export class OrchestratorAgent {
   private client: AgentsClient;
   private agent: any;
   private modelDeploymentName: string;
 
-  constructor(projectEndpoint: string, modelDeploymentName: string) {
-    this.client = new AgentsClient(projectEndpoint, new DefaultAzureCredential());
+  constructor(endpoint: string, modelDeploymentName: string) {
+    this.client = new AgentsClient(endpoint, new DefaultAzureCredential());
     this.modelDeploymentName = modelDeploymentName;
   }
 
-  // Initialize agent with reasoning/planning and registered tools
   async init() {
-    // Register function tools
-    const functionTools = [
-      ToolUtility.createFunctionTool(getBrandTool).definition,
-      ToolUtility.createFunctionTool(createPostTool).definition,
-    ];
-
-    // Create agent with instructions for reasoning/planning
     this.agent = await this.client.createAgent(this.modelDeploymentName, {
       name: "content-orchestrator-agent",
-      instructions:
-        "You are a social content orchestrator. Plan and reason through each step to create and post branded content. Use the available tools to fetch brand info and create posts.",
-      tools: functionTools,
+      instructions: `
+        You are an expert social media agent.
+        Always follow the OpenAPI model specification for all tool calls.
+        Call the getBrand tool to retrieve brand details before generating a post.
+        The post should be in the format of the postCopy schema.
+        When you call createPost, you must provide both brandId and postCopy, matching the required fields in the OpenAPI mode for postRequest.
+        Validate your payloads before calling any tool.
+        Reason and plan your actions step by step.
+      `,
+      tools: [
+        ToolUtility.createFunctionTool(getBrandTool).definition,
+        ToolUtility.createFunctionTool(createPostTool).definition,
+      ],
     });
   }
 
-  // Orchestrate workflow: receive brandId, fetch brand, generate post copy, create post
-  async runOrchestration(brandId: string) {
-    if (!this.agent) {
-      await this.init();
-    }
-    // Create thread for this orchestration
+  async run(initialMessage: string | object) {
+    if (!this.agent) await this.init();
     const thread = await this.client.threads.create();
-    // Send initial message with brandId
-    await this.client.messages.create(thread.id, "user", `Create a branded post for brandId: ${brandId}`);
-
-    // Start run and handle tool calls
-    const run = await this.client.runs.createAndPoll(thread.id, this.agent.id, {
-      pollingOptions: { intervalInMs: 2000 },
-      onResponse: async (response: any) => {
-        if (response.parsedBody.status === "requires_action" && response.parsedBody.required_action) {
-          const toolCall = response.parsedBody.required_action;
-          let toolResult;
-          switch (toolCall.function.name) {
-            case "getBrand":
-              toolResult = await getBrandTool.execute(toolCall.function.parameters);
-              break;
-            case "createPost":
-              toolResult = await createPostTool.execute(toolCall.function.parameters);
-              break;
-            default:
-              toolResult = { error: "Unknown tool" };
-          }
-          // Return tool output to agent
-          return {
-            toolCallId: toolCall.id,
-            output: JSON.stringify(toolResult),
-          };
-        }
-      },
-    });
-    // Collect and return agent output
-    const messagesIterator = this.client.messages.list(thread.id);
-    const allMessages = [];
-    for await (const m of messagesIterator) {
-      allMessages.push(m);
+    const userMessage = typeof initialMessage === "string" ? initialMessage : JSON.stringify(initialMessage);
+    await this.client.messages.create(thread.id, "user", userMessage);
+    let run = await this.client.runs.create(thread.id, this.agent.id);
+    while (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled") {
+      if (run.requiredAction && run.requiredAction.type === "submit_tool_outputs") {
+        // Debug log to inspect requiredAction structure
+        console.debug("[OrchestratorAgent] requiredAction:", JSON.stringify(run.requiredAction));
+        const toolCalls = (run.requiredAction as any).submitToolOutputs?.toolCalls;
+        if (!toolCalls) throw new Error("Tool calls not found in requiredAction.submitToolOutputs");
+        const outputs = await Promise.all(
+          toolCalls.map(async (toolCall: any) => {
+            const params = typeof toolCall.function.arguments === "string"
+              ? JSON.parse(toolCall.function.arguments)
+              : toolCall.function.arguments;
+            let result;
+            if (toolCall.function.name === "getBrand") {
+              result = await getBrandTool.execute(params);
+            } else if (toolCall.function.name === "createPost") {
+              // Type-safe payload construction for createPost
+              const postPayload: components["schemas"]["postRequest"] = {
+                brandId: params.brandId,
+                postCopy: params.postCopy,
+              };
+              result = await createPostTool.execute({
+                brandId: postPayload.brandId,
+                postCopy: postPayload.postCopy,
+              });
+            } else {
+              result = { error: "Unknown tool" };
+            }
+            return { toolCallId: toolCall.id, output: JSON.stringify(result) };
+          })
+        );
+        await this.client.runs.submitToolOutputs(thread.id, run.id, outputs);
+      }
+      run = await this.client.runs.get(thread.id, run.id);
     }
-    return allMessages;
+    const messages = [];
+    for await (const m of this.client.messages.list(thread.id)) {
+      messages.push(m);
+    }
+    return messages;
   }
 }
