@@ -134,11 +134,11 @@ export interface components {
         };
         postCopy: {
             /** @description The content of the post. */
-            content?: string;
+            content: string;
             /** @description A comment on the post. */
-            comment?: string;
+            comment: string;
             /** @description A list of hashtags associated with the post. */
-            hashtags?: string[];
+            hashtags: string[];
         };
         BrandStyle: {
             colors?: {

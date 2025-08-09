@@ -14,22 +14,20 @@ export async function createPost(args: {
     throw new Error("Missing or invalid required field: postCopy");
   }
   // Validate postCopy fields according to spec
-  const { content, comment, hashtags } = args.postCopy;
-  if (content !== undefined && typeof content !== "string") {
-    throw new Error("postCopy.content must be a string if provided");
-  }
-  if (comment !== undefined && typeof comment !== "string") {
-    throw new Error("postCopy.comment must be a string if provided");
-  }
-  if (hashtags !== undefined) {
-    if (!Array.isArray(hashtags)) {
-      throw new Error("postCopy.hashtags must be an array if provided");
+    const { content, comment, hashtags } = args.postCopy;
+    if (typeof content !== "string" || !content) {
+      throw new Error("postCopy.content is required and must be a non-empty string");
+    }
+    if (typeof comment !== "string" || !comment) {
+      throw new Error("postCopy.comment is required and must be a non-empty string");
+    }
+    if (!Array.isArray(hashtags) || hashtags.length === 0) {
+      throw new Error("postCopy.hashtags is required and must be a non-empty array of strings");
     }
     for (const tag of hashtags) {
-      if (typeof tag !== "string") {
-        throw new Error("Each hashtag in postCopy.hashtags must be a string");
+      if (typeof tag !== "string" || !tag) {
+        throw new Error("Each hashtag in postCopy.hashtags must be a non-empty string");
       }
-    }
   }
   const container = getPostsContainer();
   const postDoc: Partial<components["schemas"]["postResponse"]> = {

@@ -55,15 +55,29 @@ export class OrchestratorAgent {
             if (toolCall.function.name === "getBrand") {
               result = await getBrandTool.execute(params);
             } else if (toolCall.function.name === "createPost") {
-              // Type-safe payload construction for createPost
+              // Robust payload mapping for createPost
+              const postCopy = {
+                content: params.postCopy?.content || "",
+                comment: params.postCopy?.comment || "",
+                hashtags: Array.isArray(params.postCopy?.hashtags)
+                  ? params.postCopy.hashtags
+                  : Array.isArray(params.postCopy?.tags)
+                    ? params.postCopy.tags
+                    : [],
+              };
               const postPayload: components["schemas"]["postRequest"] = {
                 brandId: params.brandId,
-                postCopy: params.postCopy,
+                postCopy,
               };
-              result = await createPostTool.execute({
-                brandId: postPayload.brandId,
-                postCopy: postPayload.postCopy,
-              });
+              try {
+                result = await createPostTool.execute({
+                  brandId: postPayload.brandId,
+                  postCopy: postPayload.postCopy,
+                });
+              } catch (error) {
+                console.error("[OrchestratorAgent] createPostTool error:", error);
+                result = { error: error instanceof Error ? error.message : String(error) };
+              }
             } else {
               result = { error: "Unknown tool" };
             }
