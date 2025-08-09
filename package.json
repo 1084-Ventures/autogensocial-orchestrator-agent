@@ -1,0 +1,40 @@
+{
+  "name": "orchestrator-agent",
+  "version": "1.0.0",
+  "description": "",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "clean": "rimraf dist",
+    "prestart": "npm run clean && npm run build",
+    "start": "func start --port 7072 --verbose",
+    "generate:models:v1": "openapi-typescript '../specs/openapi-bundled.json' --output '.src/generated/models.ts'",
+    "generate:models:v2": "openapi-typescript '../specs/v2/openapi-bundled.json' --output './src/generated/v2/models.ts'",
+    "copy:fonts": "cp ../specs/resources/fonts.ts ./src/shared/fonts.ts",
+    "test": "echo \"No tests yet...\""
+  },
+  "dependencies": {
+    "@azure/ai-agents": "^1.1.0",
+    "@azure/app-configuration": "^1.9.0",
+    "@azure/core-auth": "^1.5.0",
+    "@azure/cosmos": "^4.4.1",
+    "@azure/functions": "^4.0.0",
+    "@azure/openai": "^2.0.0",
+    "@azure/storage-blob": "^12.0.0",
+    "axios": "^1.10.0",
+    "canvas": "^3.1.2",
+    "luxon": "^3.7.1",
+    "node-fetch": "^2.7.0",
+    "openai": "^5.10.2",
+    "uuid": "^11.1.0"
+  },
+  "devDependencies": {
+    "@azure/identity": "^4.11.0",
+    "@types/node": "^20.19.9",
+    "@types/uuid": "^10.0.0",
+    "openapi-typescript": "^7.8.0",
+    "rimraf": "^5.0.0",
+    "typescript": "^5.0.0"
+  },
+  "main": "dist/src/{index.js,functions/*.js}"
+}
