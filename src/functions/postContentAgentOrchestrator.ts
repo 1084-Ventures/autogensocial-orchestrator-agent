@@ -1,5 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { OrchestratorAgent } from "../agent/OrchestratorAgent";
+import { OrchestratorAgent } from "../agent/orchestratorAgent";
 
 export async function postContentAgentOrchestrator(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
     context.log(`[postContentAgentOrchestrator] Request received for url: ${request.url}`);

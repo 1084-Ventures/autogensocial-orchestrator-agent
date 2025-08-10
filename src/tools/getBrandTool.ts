@@ -1,4 +1,3 @@
-console.log('[getBrandTool] Tool module loaded');
 import { getBrandsContainer } from "../clients/cosmosClient";
 import { components } from "../generated/v2/models";
 

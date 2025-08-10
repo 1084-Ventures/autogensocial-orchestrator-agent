@@ -24,6 +24,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v2/postPlans/{postPlanId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a postPlan by postPlanId */
+        get: operations["getPostPlanById"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v2/brands/{brandId}": {
         parameters: {
             query?: never;
@@ -217,6 +234,15 @@ export interface components {
             brandId: string;
             postCopy: components["schemas"]["postCopy"];
         };
+        /** @description Request to get a postPlan by postPlanId. */
+        GetPostPlansByIdRequest: {
+            /** @description Unique identifier for the postplan. */
+            postPlanId: string;
+        };
+        /** @description Response containing the post plan details. */
+        GetPostPlanByIdResponse: {
+            postPlan: components["schemas"]["PostPlanDocument"];
+        };
         ContentOrchestratorRequest: {
             /** @description The brand partition key in CosmosDB. */
             brandId: string;
@@ -332,6 +358,33 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["postResponse"];
+                };
+            };
+            400: components["responses"]["BadRequest"];
+            401: components["responses"]["Unauthorized"];
+            404: components["responses"]["NotFound"];
+            429: components["responses"]["RateLimitExceeded"];
+        };
+    };
+    getPostPlanById: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Unique identifier for the postPlan. */
+                postPlanId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description PostPlan found */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GetPostPlanByIdResponse"];
                 };
             };
             400: components["responses"]["BadRequest"];
