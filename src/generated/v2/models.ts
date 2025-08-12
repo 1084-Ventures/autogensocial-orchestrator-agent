@@ -150,12 +150,17 @@ export interface components {
             };
         };
         postCopy: {
-            /** @description The content of the post. */
-            content: string;
             /** @description A comment on the post. */
             comment: string;
             /** @description A list of hashtags associated with the post. */
             hashtags: string[];
+            content: {
+                mediaNumber: number;
+                /** @enum {string} */
+                mediaType: "image" | "video";
+                mediaCopy: string;
+                mediaDescription: string;
+            }[];
         };
         BrandStyle: {
             colors?: {

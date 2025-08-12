@@ -39,9 +39,9 @@ export const getPostPlanTool = {
     parameters: {
         type: "object",
         properties: {
-            brandId: { type: "string", description: "Unique identifier for the brand." }
+            postPlanId: { type: "string", description: "Unique identifier for the post plan." }
         },
-        required: ["brandId"]
+        required: ["postPlanId"]
     },
     execute: async (args: { postPlanId: string }) => {
         console.log('[getPostPlanTool] execute INVOKED with args:', args);

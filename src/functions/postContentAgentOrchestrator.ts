@@ -7,22 +7,14 @@ export async function postContentAgentOrchestrator(request: HttpRequest, context
     try {
         body = await request.json();
         context.log("[postContentAgentOrchestrator] Request body:", JSON.stringify(body));
-        const brandId = body.brandId;
-        if (!brandId) {
-            context.error("[postContentAgentOrchestrator] Missing brandId in request body");
-            return { status: 400, body: "Missing brandId in request body" };
-        }
-
         // Log agent initialization
-        const projectEndpoint = process.env["PROJECT_ENDPOINT"] || "<your-project-endpoint>";
-        const modelDeploymentName = process.env["MODEL_DEPLOYMENT_NAME"] || "gpt-4o";
-        context.log(`[postContentAgentOrchestrator] Initializing OrchestratorAgent with endpoint: ${projectEndpoint}, model: ${modelDeploymentName}`);
-        const agent = new OrchestratorAgent(projectEndpoint, modelDeploymentName);
+        const modelDeploymentName = process.env["MODEL_DEPLOYMENT_NAME"] || "gpt-4.1";
+        context.log(`[postContentAgentOrchestrator] Initializing OrchestratorAgent with model: ${modelDeploymentName}`);
+        const agent = new OrchestratorAgent(modelDeploymentName);
 
         // Log before orchestration
-        context.log(`[postContentAgentOrchestrator] Invoking agent.runOrchestration for brandId: ${brandId}`);
-    const initialMessage = `Create a branded post for brandId: ${brandId}`;
-    const result = await agent.run(initialMessage);
+        context.log(`[postContentAgentOrchestrator] Invoking agent.runOrchestration with full request body`);
+        const result = await agent.run(body); // Forward the entire request object
         context.log("[postContentAgentOrchestrator] Orchestration result:", JSON.stringify(result));
 
         // Log response
