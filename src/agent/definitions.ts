@@ -3,12 +3,14 @@ import { getBrandTool } from "../tools/getBrandTool";
 import { createPostTool } from "../tools/createPostTool";
 import { getPostPlanTool } from "../tools/getPostPlanTool";
 import { updatePostTool } from "../tools/updatePostTool";
+import { getPostsTool } from  "../tools/getPostsTool";
 
 export const agentToolDefinitions = [
   ToolUtility.createFunctionTool(getBrandTool).definition,
   ToolUtility.createFunctionTool(getPostPlanTool).definition,
   ToolUtility.createFunctionTool(createPostTool).definition,
   ToolUtility.createFunctionTool(updatePostTool).definition,
+  ToolUtility.createFunctionTool(getPostsTool).definition,
 ];
 
 export const agentToolMap = {
@@ -16,4 +18,5 @@ export const agentToolMap = {
   getPostPlan: getPostPlanTool,
   createPost: createPostTool,
   updatePost: updatePostTool,
+  getPosts: getPostsTool,
 };

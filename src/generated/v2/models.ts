@@ -198,6 +198,45 @@ export interface components {
             description?: string;
             style?: components["schemas"]["BrandStyle"];
         };
+        /**
+         * Task
+         * @description Represents a unit of work performed by an agent or orchestrator, including status, input/output, and tracking metadata.
+         *
+         */
+        Task: {
+            /** @description Unique identifier for the task. */
+            id: string;
+            /**
+             * @description Current status of the task.
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
+            /** @description Identifier of the agent responsible for this task. */
+            agentId: string;
+            /** @description Input payload for the task (structure defined by use case). */
+            input?: Record<string, never> | null;
+            /** @description Output/result of the task (structure defined by use case). */
+            output?: Record<string, never> | null;
+            /** @description Error details if the task failed. */
+            error?: Record<string, never> | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when the task was created.
+             */
+            createdAt: string;
+            /**
+             * Format: date-time
+             * @description Timestamp when the task was last updated.
+             */
+            updatedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description Timestamp when the task was completed.
+             */
+            completedAt?: string | null;
+            /** @description Optional thread/workflow this task belongs to. */
+            threadId?: string | null;
+        };
         Metadata: {
             /**
              * Format: date-time
@@ -230,6 +269,7 @@ export interface components {
             /** @description Unique identifier for the post. */
             id: string;
             brandId: string;
+            postPlanId?: string;
             postCopy: components["schemas"]["postCopy"];
             /** @enum {string} */
             status?: "draft" | "scheduled" | "posted" | "failed";
@@ -237,7 +277,24 @@ export interface components {
         postRequest: {
             /** @description The brand this post belongs to. */
             brandId: string;
+            /** @description The ID of the post plan this post belongs to. */
+            postPlanId: string;
             postCopy: components["schemas"]["postCopy"];
+        };
+        getPostsResponse: {
+            posts?: {
+                [key: string]: unknown;
+            }[];
+        };
+        getPostsRequest: {
+            /** @description The brand to fetch posts for. */
+            brandId: string;
+            /** @description The ID of the post plan to fetch posts for. */
+            postPlanId?: string;
+            /** @description List of fields to return from each post. */
+            fields?: string[];
+            /** @description Max number of posts to return. */
+            limit?: number;
         };
         /** @description Request to get a postPlan by postPlanId. */
         GetPostPlansByIdRequest: {

@@ -1,122 +1,121 @@
-import { AgentsClient } from "@azure/ai-agents";
-import { DefaultAzureCredential } from "@azure/identity";
 import { components } from "../generated/v2/models";
 import { agentToolDefinitions, agentToolMap } from "./definitions";
+import { BaseAgent } from "./baseAgent";
 
-export class CopywriterAgent {
-  private client: AgentsClient;
-  private agent: any;
-  private modelDeploymentName: string;
-  private static AGENT_ID_FILE = require("path").resolve(process.cwd(), ".copywriter-agent-id");
-  private static INSTRUCTIONS_FILE = require("path").resolve(process.cwd(), ".copywriter-agent-instructions.txt");
 
-  constructor(endpoint: string, modelDeploymentName: string) {
-    this.client = new AgentsClient(endpoint, new DefaultAzureCredential());
-    this.modelDeploymentName = modelDeploymentName;
+export class CopywriterAgent extends BaseAgent {
+  constructor(modelDeploymentName: string) {
+    super(
+      modelDeploymentName,
+      require('path').resolve(process.cwd(), '.copywriter-agent-id'),
+      require('path').resolve(process.cwd(), '.copywriter-agent-instructions.txt')
+    );
   }
 
-  async init() {
-    const fs = require("fs");
-    let agentId;
-    let instructions = "";
-    // Read instructions from file
-    if (fs.existsSync(CopywriterAgent.INSTRUCTIONS_FILE)) {
-      try {
-        instructions = fs.readFileSync(CopywriterAgent.INSTRUCTIONS_FILE, "utf8");
-      } catch (err) {
-        console.warn("Could not read copywriter agent instructions file:", err);
+  async init(): Promise<void> {
+    await this.initAgent({
+      name: "copywriter-agent",
+      tools: agentToolDefinitions
+    });
+  }
+
+  /**
+   * Generates copy using the agent, given brand and post plan documents.
+   * @param brandDocument BrandDocument (OpenAPI type)
+   * @param postPlanDocument PostPlanDocument (OpenAPI type)
+   */
+  async generateCopy(
+    brandDocument: components["schemas"]["BrandDocument"],
+    postPlanDocument: components["schemas"]["PostPlanDocument"]
+  ): Promise<any> {
+    if (!this.agent) await this.init();
+
+    // Construct Task input contract
+    const taskInput = {
+      payload: {
+        brandDocument,
+        postPlanDocument
       }
-    }
-    if (!instructions) {
-      instructions = `You are an expert social media copywriter agent. Instructions file not found.`;
-    }
-    if (fs.existsSync(CopywriterAgent.AGENT_ID_FILE)) {
-      try {
-        agentId = fs.readFileSync(CopywriterAgent.AGENT_ID_FILE, "utf8").trim();
-      } catch (err) {
-        console.warn("Could not read copywriter agent ID file:", err);
-      }
-    }
-    let agentNeedsUpdate = false;
-    if (agentId) {
-      try {
-        this.agent = await this.client.getAgent(agentId);
-        // Check if instructions have changed
-        if (this.agent && this.agent.instructions !== instructions) {
-          agentNeedsUpdate = true;
-        } else if (this.agent) {
-          return;
+    };
+
+    // Provide all context to the agent and let it plan tool usage
+    const thread = await this.client.threads.create();
+    const userMessage = JSON.stringify(taskInput);
+    await this.client.messages.create(thread.id, "user", userMessage);
+
+    // Use the autonomous agent loop from BaseAgent
+    const agentOutput = await this.runAgentAutonomously(thread.id, this.agent.id, agentToolMap);
+
+
+    // Log the raw agent output for debugging
+    this.logInfo("[CopywriterAgent] Raw agent output before parsing:", { agentOutput });
+
+    // Additional: Log each message in agentOutput array, including text content, for debugging
+    if (Array.isArray(agentOutput)) {
+      agentOutput.forEach((msg, idx) => {
+        this.logInfo(`[CopywriterAgent] agentOutput[${idx}]:`, msg);
+        if (msg && typeof msg === "object" && msg.text !== undefined) {
+          this.logInfo(`[CopywriterAgent] agentOutput[${idx}].text:`, msg.text);
         }
-      } catch (err) {
-        console.warn("Could not load existing copywriter agent by ID, will create new agent.", err);
-      }
+      });
     }
-    // Create or update agent and persist its ID
-    if (!this.agent || agentNeedsUpdate) {
-      if (this.agent && agentNeedsUpdate) {
-        // Update agent instructions online
-        try {
-          this.agent = await this.client.updateAgent(this.agent.id, { instructions });
-        } catch (err) {
-          console.warn("Could not update copywriter agent instructions online:", err);
-        }
+
+    // Parse and validate output: must be a Task object with payload.postCopy
+
+    let output = null;
+    if (Array.isArray(agentOutput)) {
+      // Try to find the last assistant message (legacy format)
+      const lastAssistantMsg = agentOutput.slice().reverse().find((m: any) => m.role === "assistant");
+      this.logInfo("[CopywriterAgent] Last assistant message:", { lastAssistantMsg });
+      if (lastAssistantMsg) {
+        output = lastAssistantMsg?.content?.[0]?.text?.value || lastAssistantMsg?.content || null;
+      } else if (agentOutput[0]?.text?.value) {
+        // Newer format: use the first message's text.value if present
+        output = agentOutput[0].text.value;
       } else {
-        this.agent = await this.client.createAgent(this.modelDeploymentName, {
-          name: "copywriter-agent",
-          instructions,
-          tools: agentToolDefinitions,
-        });
-        if (this.agent && this.agent.id) {
-          try {
-            fs.writeFileSync(CopywriterAgent.AGENT_ID_FILE, this.agent.id, "utf8");
-          } catch (err) {
-            console.warn("Could not write copywriter agent ID file:", err);
+        output = null;
+      }
+    } else if (typeof agentOutput === "string" || typeof agentOutput === "object") {
+      output = agentOutput;
+    }
+
+    this.logInfo("[CopywriterAgent] Output to be parsed:", { output });
+
+    let parsed: any = null;
+    if (output) {
+      try {
+        parsed = typeof output === "string" ? JSON.parse(output) : output;
+      } catch (err) {
+        this.logWarn("[CopywriterAgent] Failed to parse output as JSON", { output, err });
+        // Fallback: try to extract first JSON object from output string
+        if (typeof output === "string") {
+          const jsonMatch = output.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            try {
+              parsed = JSON.parse(jsonMatch[0]);
+            } catch (fallbackErr) {
+              this.logWarn("[CopywriterAgent] Fallback JSON extraction failed", { jsonMatch, fallbackErr });
+            }
           }
         }
       }
     }
-  }
 
-  async generateCopy(brandDocument: components["schemas"]["BrandDocument"], postPlanDocument: components["schemas"]["PostPlanDocument"]) {
-    if (!this.agent) await this.init();
-    const thread = await this.client.threads.create();
-    const userMessage = JSON.stringify({ brandDocument, postPlanDocument });
-    await this.client.messages.create(thread.id, "user", userMessage);
-    let run = await this.client.runs.create(thread.id, this.agent.id);
-    while (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled") {
-      if (run.requiredAction && run.requiredAction.type === "submit_tool_outputs") {
-        const toolCalls = (run.requiredAction as any).submitToolOutputs?.toolCalls;
-        if (!toolCalls) throw new Error("Tool calls not found in requiredAction.submitToolOutputs");
-        const outputs = await Promise.all(
-          toolCalls.map(async (toolCall: any) => {
-            const params = typeof toolCall.function.arguments === "string"
-              ? JSON.parse(toolCall.function.arguments)
-              : toolCall.function.arguments;
-            // Use the agentToolMap to find and execute the correct tool
-            const toolFn = agentToolMap[toolCall.function.name];
-            let result;
-            if (toolFn) {
-              try {
-                result = await toolFn.execute(params);
-              } catch (error) {
-                result = { error: error instanceof Error ? error.message : String(error) };
-              }
-            } else {
-              result = { error: "Unknown tool" };
-            }
-            return { toolCallId: toolCall.id, output: JSON.stringify(result) };
-          })
-        );
-        await this.client.runs.submitToolOutputs(thread.id, run.id, outputs);
-      }
-      run = await this.client.runs.get(thread.id, run.id);
+    this.logInfo("[CopywriterAgent] Parsed output:", { parsed });
+
+    // Validate output contract
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      parsed.payload &&
+      parsed.payload.postCopy &&
+      typeof parsed.payload.postCopy === "object"
+    ) {
+      this.logInfo("[CopywriterAgent] Generated new postCopy and returning Task payload.", { postCopy: parsed.payload.postCopy });
+      return parsed;
+    } else {
+      this.logWarn("[CopywriterAgent] Agent did not return valid Task with payload.postCopy. Returning null postCopy.", { output, parsed });
+      return { payload: { postCopy: null } };
     }
-    // Extract the agent's response
-    const messages = [];
-    for await (const m of this.client.messages.list(thread.id)) {
-      messages.push(m);
-    }
-    // Return the last message as the generated copy
-    return messages[messages.length - 1]?.content;
   }
 }
