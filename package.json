@@ -30,11 +30,12 @@
   },
   "devDependencies": {
     "@azure/identity": "^4.11.0",
-    "@types/node": "^20.19.9",
+    "@types/node": "^20.19.11",
     "@types/uuid": "^10.0.0",
     "openapi-typescript": "^7.8.0",
     "rimraf": "^5.0.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "vitest": "^3.2.4"
   },
   "main": "dist/src/{index.js,functions/*.js}"
 }
