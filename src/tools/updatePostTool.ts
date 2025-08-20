@@ -1,4 +1,4 @@
-import { getPostsContainer } from "../clients/cosmosClient";
+import { getPostsContainer } from "../shared/cosmosClient";
 import { components } from "../generated/v2/models";
 
 // Tool definition strictly following OpenAPI contract

@@ -3,179 +3,303 @@ import { getBrand } from "../tools/getBrandTool";
 import { getPostPlan } from "../tools/getPostPlanTool";
 import { getPosts } from "../tools/getPostsTool";
 import { createPost } from "../tools/createPostTool";
-import fs from "fs";
-import path from "path";
 import { CopywriterAgent } from "../agent/copywriterAgent";
+import { getAgentRunsContainer } from "../shared/cosmosClient";
+import crypto from "crypto";
+import { TraceManager } from "../shared/traceUtils";
+import { errorResponse, makeHandleError } from "../shared/errorUtils";
 import { components } from "../generated/v2/models";
 
-// Helper to dispatch tool calls by name
-async function callToolByName(toolName: string, parameters: any) {
-    switch (toolName) {
-        case "getBrand":
-            return await getBrand(parameters);
-        case "getPostPlan":
-            return await getPostPlan(parameters);
-        case "getPosts":
-            return await getPosts(parameters);
-        default:
-            throw new Error(`Unknown tool: ${toolName}`);
-    }
-}
+type BrandDocument = components["schemas"]["BrandDocument"];
+type PostPlanDocument = components["schemas"]["PostPlanDocument"];
+type CopywriterAgentRequest = components["schemas"]["CopywriterAgentRequest"];
+type CopywriterAgentResponse = components["schemas"]["CopywriterAgentResponse"];
+type Step = components["schemas"]["Step"];
+type Message = components["schemas"]["Message"];
+type AgentRunsDocument = components["schemas"]["agentRunsDocument"];
+type AgentRunTrace = components["schemas"]["AgentRunTrace"];
+type TraceEvent = components["schemas"]["TraceEvent"];
 
-/**
- * Helper to create a structured error response and log the error.
- */
-function errorResponse(context: InvocationContext, status: number, message: string, details?: any, extra?: Record<string, any>) {
-    context.error(`[orchestrateContent] ERROR: ${message}`, details);
-    return {
-        status,
-        jsonBody: {
-            success: false,
-            message,
-            error: details?.message || details || message,
-            ...extra
-        }
-    };
-}
+    export async function orchestrateContent(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
+        const handleError = makeHandleError(context);
+        context.log(`[orchestrateContent] Request received for url: ${request.url}`);
 
-/**
- * Helper to create a structured success response.
- */
-function successResponse(message: string, data: Record<string, any> = {}) {
-    return {
-        status: 200,
-        jsonBody: {
-            success: true,
-            message,
-            ...data
-        }
-    };
-}
+        // --- Traceability setup ---
+        const traceRunId = crypto.randomUUID();
+        const traceManager = new TraceManager(traceRunId, "orchestrator");
+        traceManager.addEvent({
+            eventType: "start",
+            metadata: { url: request.url },
+            agentName: "orchestrator"
+        });
 
-export async function orchestrateContent(request: HttpRequest, context: InvocationContext): Promise<HttpResponseInit> {
-    context.log(`[orchestrateContent] Request received for url: ${request.url}`);
-    let body: any = undefined;
-    try {
-        body = await request.json();
-        context.log("[orchestrateContent] Request body:", JSON.stringify(body));
-    } catch (err) {
-        return errorResponse(context, 400, "Invalid JSON in request body", err);
-    }
-
-    const { postPlanId, brandId } = body || {};
-    if (!postPlanId || !brandId) {
-        return errorResponse(context, 400, "Missing postPlanId or brandId in request body");
-    }
-
-    // Fetch postPlan and brand using tools
-    let postPlan, brand;
-    try {
-        const postPlanResult = await getPostPlan({ postPlanId });
-        postPlan = postPlanResult?.postPlan;
-        if (!postPlan) {
-            return errorResponse(context, 404, "postPlan not found", undefined, { postPlanId });
-        }
-        context.log("[orchestrateContent] postPlan fetched");
-    } catch (err) {
-        return errorResponse(context, 500, "Error fetching postPlan", err, { postPlanId });
-    }
-
-    try {
-        const brandResult = await getBrand({ brandId });
-        brand = brandResult?.brand;
-        if (!brand) {
-            return errorResponse(context, 404, "brand not found", undefined, { brandId });
-        }
-        context.log("[orchestrateContent] brand fetched");
-    } catch (err) {
-        return errorResponse(context, 500, "Error fetching brand", err, { brandId });
-    }
-
-    // Fetch previous post comments for this brand (optional, can be used as context)
-    let previousPosts: any[] = [];
-    try {
-        const prev = await getPosts({ brandId, fields: ["postCopy.comment"] });
-        previousPosts = prev?.posts || [];
-        context.log(`[orchestrateContent] Found ${previousPosts.length} previous post comments for brandId ${brandId}`);
-    } catch (err) {
-        context.error(`[orchestrateContent] Failed to fetch previous posts for brandId ${brandId}`, err);
-    }
-
-    // Use local CopywriterAgent class to orchestrate agent creation/update and run
-    const modelDeploymentName = process.env.MODEL_DEPLOYMENT_NAME || "gpt-4.1";
-    const copywriterAgent = new CopywriterAgent(modelDeploymentName);
-    try {
-        await copywriterAgent.init();
-    } catch (err) {
-        return errorResponse(context, 500, "Failed to initialize CopywriterAgent", err);
-    }
-
-    // Run the agent to generate post copy
-    let agentOutput;
-    try {
-        agentOutput = await copywriterAgent.generateCopy(brand, postPlan);
-    } catch (err) {
-        return errorResponse(context, 500, "Error running copywriter agent", err);
-    }
-
-    // Extract postCopy from agent output
-    let postCopy: components["schemas"]["postCopy"] | undefined;
-    let outputMessages = agentOutput;
-    let output = null;
-    if (Array.isArray(agentOutput)) {
-        // If agentOutput is a list of messages, find the last assistant message
-        const lastAssistantMsg = [...agentOutput].reverse().find(m => m.role === "assistant");
-        output = lastAssistantMsg?.content?.[0]?.text?.value || lastAssistantMsg?.content || null;
-    } else if (typeof agentOutput === "string" || typeof agentOutput === "object") {
-        output = agentOutput;
-    }
-    if (output) {
-        context.log("[orchestrateContent] Raw agent output:", output);
+        let body: unknown;
         try {
-            const parsed = typeof output === "string" ? JSON.parse(output) : output;
-            // Extract postCopy from output.payload.postCopy if present
-            postCopy = parsed?.payload?.postCopy ?? parsed?.postCopy ?? parsed;
+            body = await request.json();
+            context.log("[orchestrateContent] Request body:", JSON.stringify(body));
         } catch (err) {
-            context.error("[orchestrateContent] Failed to parse agent output as postCopy", err);
-            // Fallback: try to extract first JSON object from output string
-            if (typeof output === "string") {
-                const jsonMatch = output.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                    try {
-                        const parsed = JSON.parse(jsonMatch[0]);
-                        postCopy = parsed?.payload?.postCopy ?? parsed?.postCopy ?? parsed;
-                        context.log("[orchestrateContent] Fallback JSON extraction succeeded.");
-                    } catch (fallbackErr) {
-                        context.error("[orchestrateContent] Fallback JSON extraction failed", fallbackErr);
-                    }
-                }
-            }
+            return handleError({
+                status: 400,
+                message: "Invalid JSON in request body",
+                error: err,
+                agentName: "orchestrator",
+                traceManager
+            });
         }
-    }
-    if (!postCopy) {
-        return errorResponse(context, 500, "No postCopy returned from agent");
-    }
 
-    // Call createPost tool with only the postCopy object
-    let postResponse;
-    try {
-        postResponse = await createPost({ brandId, postCopy });
-        context.log("[orchestrateContent] Post created successfully", postResponse);
-    } catch (err) {
-        return errorResponse(context, 500, "Failed to create post", err);
-    }
+        function isContentOrchestratorRequest(obj: any): obj is components["schemas"]["ContentOrchestratorRequest"] {
+            return obj && typeof obj === 'object' && typeof obj.brandId === 'string' && typeof obj.postPlanId === 'string';
+        }
 
-    // Return both agent output and post creation result
-    return successResponse("Agent run completed and post created.", {
-        output,
-        post: postResponse,
-        allMessages: outputMessages,
-        previousPostsCount: previousPosts.length
-    });
-}
+        if (!isContentOrchestratorRequest(body)) {
+            return handleError({
+                status: 400,
+                message: "Missing or invalid postPlanId or brandId in request body",
+                agentName: "orchestrator",
+                traceManager
+            });
+        }
+        // body is now typed
+        const { postPlanId, brandId } = body as components["schemas"]["ContentOrchestratorRequest"];
+        // Only use input if present on the request type
+        const input = ("input" in (body as object) && (body as any).input) ? (body as any).input : {};
 
-app.http('orchestrateContent', {
-    methods: ['POST'],
-    authLevel: 'anonymous',
-    handler: orchestrateContent
+        // --- Fetch postPlan ---
+        let postPlan: PostPlanDocument | undefined;
+        try {
+            traceManager.addEvent({
+                eventType: "tool-invoke",
+                agentName: "orchestrator",
+                toolName: "getPostPlan",
+                input: { postPlanId }
+            });
+            const postPlanResult = await getPostPlan({ postPlanId });
+            postPlan = postPlanResult?.postPlan;
+            traceManager.addEvent({
+                eventType: "tool-result",
+                agentName: "orchestrator",
+                toolName: "getPostPlan",
+                output: { postPlan }
+            });
+            if (!postPlan) {
+                return handleError({
+                    status: 404,
+                    message: "postPlan not found",
+                    error: { postPlanId },
+                    toolName: "getPostPlan",
+                    agentName: "orchestrator",
+                    traceManager
+                });
+            }
+        } catch (err) {
+            return handleError({
+                status: 500,
+                message: "Error fetching postPlan",
+                error: { details: err, postPlanId },
+                toolName: "getPostPlan",
+                agentName: "orchestrator",
+                traceManager
+            });
+        }
+
+        // --- Fetch brand ---
+        let brand: BrandDocument | undefined;
+        try {
+            traceManager.addEvent({
+                eventType: "tool-invoke",
+                agentName: "orchestrator",
+                toolName: "getBrand",
+                input: { brandId }
+            });
+            const brandResult = await getBrand({ brandId });
+            brand = brandResult?.brand;
+            traceManager.addEvent({
+                eventType: "tool-result",
+                agentName: "orchestrator",
+                toolName: "getBrand",
+                output: { brand }
+            });
+            if (!brand) {
+                return handleError({
+                    status: 404,
+                    message: "brand not found",
+                    error: { brandId },
+                    toolName: "getBrand",
+                    agentName: "orchestrator",
+                    traceManager
+                });
+            }
+        } catch (err) {
+            return handleError({
+                status: 500,
+                message: "Error fetching brand",
+                error: { details: err, brandId },
+                toolName: "getBrand",
+                agentName: "orchestrator",
+                traceManager
+            });
+        }
+
+        // --- Prepare request for copywriter agent ---
+        const copywriterRequest: CopywriterAgentRequest = {
+            brandDocument: brand,
+            postPlanDocument: postPlan,
+            additionalContext: {
+                ...input
+            }
+        };
+
+        // --- Copywriter agent ---
+        const modelDeploymentName = process.env.MODEL_DEPLOYMENT_NAME || "gpt-4.1";
+        const copywriterAgent = new CopywriterAgent(modelDeploymentName);
+        try {
+            traceManager.addEvent({
+                eventType: "tool-invoke",
+                agentName: "copywriter",
+                toolName: "generateCopy",
+                input: { brand, postPlan }
+            });
+            await copywriterAgent.init();
+        } catch (err) {
+            return handleError({
+                status: 500,
+                message: "Failed to initialize CopywriterAgent",
+                error: err,
+                toolName: "init",
+                agentName: "copywriter",
+                traceManager
+            });
+        }
+
+        let agentResponse: CopywriterAgentResponse | undefined;
+        let traceEvents: TraceEvent[] = [];
+        let stepError: string | undefined = undefined;
+        let stepStartedAt = new Date().toISOString();
+        let stepCompletedAt: string | undefined = undefined;
+        try {
+            context.log("[orchestrateContent] Calling CopywriterAgent.generateCopy with:", JSON.stringify({ brand, postPlan }));
+            const result = await copywriterAgent.generateCopy(brand, postPlan, []);
+            context.log("[orchestrateContent] Raw agent result:", JSON.stringify(result));
+            agentResponse = result?.response;
+            if (!agentResponse) {
+                context.error("[orchestrateContent] Agent returned null or undefined response:", JSON.stringify(result));
+            }
+            traceEvents = agentResponse?.traceEvents || [];
+            stepCompletedAt = new Date().toISOString();
+            traceManager.addEvent({
+                eventType: "tool-result",
+                agentName: "copywriter",
+                toolName: "generateCopy",
+                output: { agentResponse, traceEvents },
+                timestamp: stepCompletedAt
+            });
+        } catch (err) {
+            stepError = (err as Error)?.message || String(err);
+            context.error("[orchestrateContent] Exception thrown by CopywriterAgent.generateCopy:", stepError, err && (err as Error).stack);
+            stepCompletedAt = new Date().toISOString();
+            traceManager.addEvent({
+                eventType: "error",
+                agentName: "copywriter",
+                toolName: "generateCopy",
+                error: { message: stepError, stack: err && (err as Error).stack },
+                timestamp: stepCompletedAt
+            });
+        }
+
+        const step: Step = {
+            stepNumber: 1,
+            agentType: "copywriter",
+            input: copywriterRequest,
+            output: agentResponse,
+            status: agentResponse?.status === "success" ? "completed" : "failed",
+            startedAt: stepStartedAt,
+            completedAt: stepCompletedAt,
+            error: stepError
+        };
+
+        // --- Create post ---
+        let postCopy: any = undefined;
+        if (agentResponse && typeof agentResponse === 'object') {
+            postCopy = agentResponse.postCopy;
+        }
+        if (!postCopy) {
+            context.error("[orchestrateContent] No postCopy returned from agent. agentResponse:", JSON.stringify(agentResponse));
+            return handleError({
+                status: 500,
+                message: "No postCopy returned from agent",
+                error: agentResponse?.error || agentResponse,
+                toolName: "createPost",
+                agentName: "orchestrator",
+                traceManager
+            });
+        }
+
+        let postResponse;
+        try {
+            traceManager.addEvent({
+                eventType: "tool-invoke",
+                agentName: "orchestrator",
+                toolName: "createPost",
+                input: { brandId, postCopy }
+            });
+            postResponse = await createPost({ brandId, postCopy });
+            traceManager.addEvent({
+                eventType: "tool-result",
+                agentName: "orchestrator",
+                toolName: "createPost",
+                output: { postResponse }
+            });
+        } catch (err) {
+            return handleError({
+                status: 500,
+                message: "Failed to create post",
+                error: err,
+                toolName: "createPost",
+                agentName: "orchestrator",
+                traceManager
+            });
+        }
+
+        // --- Build AgentRunTrace ---
+        if (step.status === "completed") {
+          traceManager.succeed();
+        } else {
+          traceManager.status = "failed";
+          traceManager.end();
+        }
+
+        // --- Build agentRunsDocument ---
+        const agentRun = traceManager.buildAgentRun();
+
+        // --- Store run trace in agentRuns container ---
+        try {
+            const agentRunsContainer = getAgentRunsContainer();
+            await agentRunsContainer.items.create(agentRun);
+            context.log(`[orchestrateContent] Run trace stored in agentRuns container: ${traceRunId}`);
+        } catch (err) {
+            context.error(`[orchestrateContent] Failed to store run trace: ${traceRunId}` , err);
+        }
+
+        // --- Return orchestrator response ---
+        const orchestratorResponse: components["schemas"]["ContentOrchestratorResponse"] & { traceEvents?: TraceEvent[] } = {
+            runId: traceRunId,
+            status: step.status === "completed" ? "completed" : "failed",
+            result: {
+                postCopy,
+                post: postResponse
+            },
+            error: step.status === "failed" && agentResponse?.error ? { message: agentResponse.error } : undefined,
+            traceEvents
+        };
+        return {
+            status: 200,
+            jsonBody: orchestratorResponse
+        };
+        }
+
+// Register the function with Azure Functions v4 programming model
+app.http("orchestrateContent", {
+    methods: ["POST"],
+    authLevel: "function",
+    handler: orchestrateContent,
 });

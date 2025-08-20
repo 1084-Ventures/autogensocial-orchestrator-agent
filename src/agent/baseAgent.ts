@@ -236,7 +236,15 @@ export abstract class BaseAgent {
    * Usage: await this.runAgentAutonomously(threadId, this.agent.id, agentToolMap)
    */
   protected async runAgentAutonomously(threadId: string, agentId: string, toolMap: Record<string, { execute: Function }>): Promise<any> {
-    let run = await this.client.runs.create(threadId, agentId);
+    let run;
+    try {
+      this.logInfo("[runAgentAutonomously] Creating agent run", { threadId, agentId });
+      run = await this.client.runs.create(threadId, agentId);
+    } catch (err) {
+      this.logError("[runAgentAutonomously] Error creating agent run:", { error: err });
+      throw err;
+    }
+    this.logInfo("[runAgentAutonomously] Initial run status:", { status: run.status, run });
     while (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled") {
       if (
         run.requiredAction &&
@@ -245,6 +253,7 @@ export abstract class BaseAgent {
       ) {
         const toolCalls = (run.requiredAction as any).submitToolOutputs.toolCalls;
         if (!toolCalls) throw new Error("Tool calls not found in requiredAction.submitToolOutputs");
+        this.logInfo(`[runAgentAutonomously] Tool calls required: ${toolCalls.length}`);
         const outputs = await Promise.all(
           toolCalls.map(async (toolCall: any) => {
             const params = typeof toolCall.function.arguments === "string"
@@ -253,23 +262,40 @@ export abstract class BaseAgent {
             const toolObj = toolMap[toolCall.function.name];
             let result;
             try {
+              this.logInfo(`[runAgentAutonomously] Executing tool: ${toolCall.function.name}`, { params });
               result = await toolObj.execute(params);
+              this.logInfo(`[runAgentAutonomously] Tool result: ${toolCall.function.name}`, { result });
             } catch (error) {
+              this.logError(`[runAgentAutonomously] Tool error: ${toolCall.function.name}`, error, { params });
               result = { error: error instanceof Error ? error.message : String(error) };
             }
             this.logInfo(`Planned action: ${toolCall.function.name}, Params: ${JSON.stringify(params)}`);
             return { toolCallId: toolCall.id, output: JSON.stringify(result) };
           })
         );
+        this.logInfo(`[runAgentAutonomously] Submitting tool outputs`, { outputs });
         await this.client.runs.submitToolOutputs(threadId, run.id, outputs);
       }
-      run = await this.client.runs.get(threadId, run.id);
+      try {
+        run = await this.client.runs.get(threadId, run.id);
+      } catch (err) {
+        this.logError("[runAgentAutonomously] Error getting agent run status:", { error: err });
+        throw err;
+      }
+      this.logInfo("[runAgentAutonomously] Polled run status:", { status: run.status, run });
+    }
+    if (run.status === "failed" || run.status === "cancelled") {
+      this.logError("[runAgentAutonomously] Agent run failed or was cancelled:", { status: run.status, run });
     }
     // Extract the agent's response
     const messages = [];
     for await (const m of this.client.messages.list(threadId)) {
+      this.logInfo(`[runAgentAutonomously] Thread message`, { id: m.id, role: m.role, content: m.content });
       messages.push(m);
     }
+    // Log all assistant messages and their content for debugging
+    const assistantMessages = messages.filter(m => m.role === "assistant");
+    this.logInfo("[runAgentAutonomously] All assistant messages:", { assistantMessages: assistantMessages.map(m => ({ id: m.id, content: m.content })) });
     // Return the last assistant message as the result
     return messages.reverse().find(m => m.role === "assistant")?.content;
   }

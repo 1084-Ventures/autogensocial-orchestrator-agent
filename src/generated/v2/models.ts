@@ -62,6 +62,9 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        agentRunsDocument: components["schemas"]["BaseModel"] & {
+            brandInfo?: components["schemas"]["AgentRunTrace"];
+        };
         PostPlanDocument: components["schemas"]["BaseModel"] & {
             brandId?: string;
             postPlan?: components["schemas"]["PostPlan"];
@@ -91,6 +94,65 @@ export interface components {
             userId?: string;
             brandInfo?: components["schemas"]["BrandInfo"];
             socialAccounts?: components["schemas"]["SocialAccountEntry"][];
+        };
+        /** @description Event in the lifecycle of an agent run, for traceability and debugging. */
+        TraceEvent: {
+            /** @description Unique identifier for the agent run this event belongs to. */
+            runId: string;
+            /**
+             * Format: date-time
+             * @description ISO8601 timestamp of the event.
+             */
+            timestamp: string;
+            /**
+             * @description Type of event (e.g., start, tool-invoke, tool-result, error, end).
+             * @enum {string}
+             */
+            eventType: "start" | "tool-invoke" | "tool-result" | "error" | "end" | "custom";
+            /** @description Name of the agent executing the run. */
+            agentName?: string;
+            /** @description Name of the tool invoked (if applicable). */
+            toolName?: string;
+            /** @description Input payload for the event (if applicable). */
+            input?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Output payload for the event (if applicable). */
+            output?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Error details if the event is an error. */
+            error?: {
+                [key: string]: unknown;
+            } | null;
+            /** @description Additional metadata for the event. */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** @description Full trace of an agent run, including all trace events. */
+        AgentRunTrace: {
+            /** @description Unique identifier for the agent run. */
+            runId: string;
+            /** @description Name of the agent executing the run. */
+            agentName: string;
+            /** @description Ordered list of trace events for this run. */
+            events: components["schemas"]["TraceEvent"][];
+            /**
+             * Format: date-time
+             * @description Timestamp when the agent run started.
+             */
+            startedAt: string;
+            /**
+             * Format: date-time
+             * @description Timestamp when the agent run ended (if completed).
+             */
+            endedAt?: string | null;
+            /**
+             * @description Final status of the agent run.
+             * @enum {string}
+             */
+            status: "running" | "succeeded" | "failed" | "cancelled";
         };
         SocialAccountEntry: {
             platform?: components["schemas"]["Platform"];
@@ -198,44 +260,49 @@ export interface components {
             description?: string;
             style?: components["schemas"]["BrandStyle"];
         };
-        /**
-         * Task
-         * @description Represents a unit of work performed by an agent or orchestrator, including status, input/output, and tracking metadata.
-         *
-         */
-        Task: {
-            /** @description Unique identifier for the task. */
-            id: string;
+        /** @description An atomic step in an agent run, representing a single agent's action. */
+        Step: {
             /**
-             * @description Current status of the task.
+             * @description The sequence number of this step in the run.
+             * @example 2
+             */
+            stepNumber: number;
+            /**
+             * @description The type of agent performing this step (e.g., planner, copywriter, image-generator).
+             * @example copywriter
+             */
+            agentType: string;
+            /** @description The input provided to the agent for this step. */
+            input?: {
+                [key: string]: unknown;
+            };
+            /** @description The output produced by the agent for this step. */
+            output?: {
+                [key: string]: unknown;
+            };
+            /**
+             * @description The status of this step (e.g., pending, in_progress, completed, failed).
+             * @example completed
              * @enum {string}
              */
-            status: "pending" | "running" | "succeeded" | "failed" | "cancelled";
-            /** @description Identifier of the agent responsible for this task. */
-            agentId: string;
-            /** @description Input payload for the task (structure defined by use case). */
-            input?: Record<string, never> | null;
-            /** @description Output/result of the task (structure defined by use case). */
-            output?: Record<string, never> | null;
-            /** @description Error details if the task failed. */
-            error?: Record<string, never> | null;
+            status: "pending" | "in_progress" | "completed" | "failed";
             /**
              * Format: date-time
-             * @description Timestamp when the task was created.
+             * @description The ISO8601 timestamp when this step started.
+             * @example 2025-08-17T19:38:00.000Z
              */
-            createdAt: string;
+            startedAt?: string;
             /**
              * Format: date-time
-             * @description Timestamp when the task was last updated.
+             * @description The ISO8601 timestamp when this step completed.
+             * @example 2025-08-17T19:38:10.000Z
              */
-            updatedAt?: string | null;
+            completedAt?: string;
             /**
-             * Format: date-time
-             * @description Timestamp when the task was completed.
+             * @description Error message if the step failed.
+             * @example Agent timed out
              */
-            completedAt?: string | null;
-            /** @description Optional thread/workflow this task belongs to. */
-            threadId?: string | null;
+            error?: string;
         };
         Metadata: {
             /**
@@ -250,6 +317,35 @@ export interface components {
             updatedDate: string;
             /** @description Whether the record is active or soft-deleted */
             isActive: boolean;
+        };
+        /** @description A single message exchanged between agents, user, or system during an agent run. */
+        Message: {
+            /**
+             * @description The role of the message sender (e.g., system, user, agent, planner, copywriter, image-generator).
+             * @example agent
+             */
+            role: string;
+            /**
+             * @description The specific agent type if applicable (e.g., copywriter, planner, image-generator).
+             * @example copywriter
+             */
+            agentType?: string;
+            /**
+             * @description The message content (can be plain text or JSON stringified if structured).
+             * @example Write a carousel post about anxiety relief.
+             */
+            content: string;
+            /**
+             * Format: date-time
+             * @description The ISO8601 timestamp when the message was sent.
+             * @example 2025-08-17T19:38:00.000Z
+             */
+            timestamp: string;
+            /**
+             * @description The step number in the agent run this message is associated with (if applicable).
+             * @example 2
+             */
+            stepNumber?: number;
         };
         /** @description Standard error response object */
         Error: {
@@ -305,11 +401,54 @@ export interface components {
         GetPostPlanByIdResponse: {
             postPlan: components["schemas"]["PostPlanDocument"];
         };
+        /** @description Response payload for content orchestration API. */
+        ContentOrchestratorResponse: {
+            /** @description Unique identifier for the orchestration run. */
+            runId: string;
+            /**
+             * @description Status of the orchestration process.
+             * @enum {string}
+             */
+            status: "pending" | "in_progress" | "completed" | "failed";
+            /** @description The result or output of the orchestration (if any). */
+            result?: {
+                [key: string]: unknown;
+            };
+            /** @description Error details if the orchestration failed. */
+            error?: {
+                [key: string]: unknown;
+            } | null;
+        };
         ContentOrchestratorRequest: {
             /** @description The brand partition key in CosmosDB. */
             brandId: string;
             /** @description The postPlan id in CosmosDB. */
             postPlanId: string;
+        };
+        /** @description Response payload from the copywriter agent to the orchestrator. */
+        CopywriterAgentResponse: {
+            postCopy?: components["schemas"]["PostCopy"];
+            /**
+             * @description Status of the agent's response.
+             * @example success
+             * @enum {string}
+             */
+            status: "success" | "error";
+            /**
+             * @description Error message if status is error.
+             * @example Failed to generate content
+             */
+            error?: string;
+            traceEvents?: components["schemas"]["TraceEvent"][];
+        };
+        /** @description Request payload sent from the orchestrator to the copywriter agent. */
+        CopywriterAgentRequest: {
+            brandDocument: components["schemas"]["BrandDocument"];
+            postPlanDocument: components["schemas"]["PostPlanDocument"];
+            /** @description Optional additional context or parameters for the agent. */
+            additionalContext?: {
+                [key: string]: unknown;
+            };
         };
         /** @description Response containing the brand details. */
         GetBrandByIdResponse: {
@@ -319,6 +458,19 @@ export interface components {
         GetBrandByIdRequest: {
             /** @description Unique identifier for the brand. */
             brandId: string;
+        };
+        PostCopy: {
+            /** @description A comment on the post. */
+            comment: string;
+            /** @description A list of hashtags associated with the post. */
+            hashtags: string[];
+            content: {
+                mediaNumber: number;
+                /** @enum {string} */
+                mediaType: "image" | "video";
+                mediaCopy: string;
+                mediaDescription: string;
+            }[];
         };
     };
     responses: {

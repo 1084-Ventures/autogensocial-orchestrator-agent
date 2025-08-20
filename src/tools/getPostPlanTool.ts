@@ -1,4 +1,4 @@
-import { getPostPlansContainer } from "../clients/cosmosClient";
+import { getPostPlansContainer } from "../shared/cosmosClient";
 import { components } from "../generated/v2/models";
 
 /**

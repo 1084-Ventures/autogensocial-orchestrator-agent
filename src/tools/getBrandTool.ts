@@ -1,4 +1,4 @@
-import { getBrandsContainer } from "../clients/cosmosClient";
+import { getBrandsContainer } from "../shared/cosmosClient";
 import { components } from "../generated/v2/models";
 
 /**

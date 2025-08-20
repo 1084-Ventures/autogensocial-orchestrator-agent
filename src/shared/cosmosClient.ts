@@ -5,8 +5,9 @@ const databaseId = process.env.COSMOS_DB_NAME;
 const brandsContainerId = process.env.COSMOS_DB_CONTAINER_BRAND;
 const postPlansContainerId = process.env.COSMOS_DB_CONTAINER_POST_PLANS;
 const postsContainerId = process.env.COSMOS_DB_CONTAINER_POSTS;
+const agentRunsContainerId = process.env.COSMOS_DB_CONTAINER_AGENT_RUNS;
 
-if (!connectionString || !databaseId || !brandsContainerId || !postPlansContainerId || !postsContainerId) {
+if (!connectionString || !databaseId || !brandsContainerId || !postPlansContainerId || !postsContainerId || !agentRunsContainerId) {
   throw new Error("Missing CosmosDB environment variables.");
 }
 
@@ -23,4 +24,8 @@ export function getPostPlansContainer(): Container {
 
 export function getPostsContainer(): Container {
   return database.container(postsContainerId);
+}
+
+export function getAgentRunsContainer(): Container {
+  return database.container(agentRunsContainerId);
 }
